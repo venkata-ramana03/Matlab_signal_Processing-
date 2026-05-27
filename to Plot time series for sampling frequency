@@ -33,3 +33,79 @@ and then he said we have to multiply with frequency (explain clearly this part )
 like 1 data its 0sec for 20000th data points its 1sec and here the basic step before FFT 
 help me to under stand thus clearly 1st then we will code and take time and be particular
 
+
+
+
+
+clear; close all; clc; tic;
+data = readtable("Acrylic_0.csv"); % .csv extension
+data = table2array(data);
+time = data(:,1);
+x    = data(:,2);
+plot(time,x)
+%Samplig frequncy
+dt   = time(98)-time(97);
+fs   = 1/dt;
+
+%From above plot, select the spike intervel
+tStart = 2.725;
+tEnd = 2.850;
+
+% Convert times into exact data point row numbers 
+idxStart = round(tStart * fs);
+idxEnd   = round(tEnd * fs);
+
+% Extract the spike dataset 
+time_selected = time(idxStart:idxEnd);
+x_selected    = x(idxStart:idxEnd);
+
+%total number of selected data points (N)
+N = length(x_selected);
+
+% METRICS 
+Signal_Variance = var(x_selected)
+Signal_RMS      = rms(x_selected)
+
+%FFT MATH 
+Y = fft(x_selected);
+f_full = linspace(0,fs,length(Y));
+figure;
+plot(f_full,abs(Y))
+
+Y  = abs(Y);
+Y  = Y(1:floor(length(Y)/2));
+f  = linspace(0,fs/2,length(Y));
+figure;
+semilogx(f,Y)
+% % Divide by N to normalize the amplitude magnitudes
+% P2 = abs(Y/N); 
+% 
+% %Half Symmetry (Keeping the first half of positive frequencies)
+% % This retains points from 1 up to (N/2 + 1)
+% P1 = P2(1:floor(N/2)+1); 
+% 
+% %full frequency (from 0 to Fs)
+% f_full = fs * (0:N-1) / N;
+% 
+% % Multiply by 2 to conserve energy from the thrown-away negative mirror half
+% P1(2:end-1) = 2*P1(2:end-1); 
+% 
+% % accurate frequency  (up to Nyquist Fs/2)
+% f = fs * (0:floor(N/2)) / N; 
+% 
+% % The isolated Time-Domain spike
+% figure;
+% plot(time_selected, x_selected);
+% 
+% % Full-Symmetry Frequency Spectrum
+% figure;
+% stem(f_full/1000, P2, 'Marker', 'none');
+% 
+% % Half-Symmetry Frequency Spectrum
+% figure;
+% stem(f/1000, P1, 'Marker', 'none'); 
+% xlim([0.5, 5.0]); 
+
+toc;
+
+
