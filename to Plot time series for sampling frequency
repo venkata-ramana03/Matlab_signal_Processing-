@@ -1,0 +1,6 @@
+clear; close all;clc;tic;
+data = readtable("Acrylic_0");
+plot(data.Time,data.AI1_AI1)
+dt   = data.Time(96)-data.Time(95);
+fs   = 1/dt;    %Sampling frequency
+toc;
