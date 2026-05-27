@@ -4,3 +4,32 @@ plot(data.Time,data.AI1_AI1)
 dt   = data.Time(96)-data.Time(95);
 fs   = 1/dt;    %Sampling frequency
 toc;
+
+
+we have to show how we defined that form total 10 sec in the code , 
+take a break form code before that lets make this right profs are too strict 
+and particular about each and every thing saying as these tings 
+we have to write in research papers and help me under stand these standards 
+before doing FFT for the selected data (suppose consider out of 10 sec I selected and wrote in code that frequency for 2.725 to 2.85) 
+and from the plot as per the data we get in full cycles and in symmetry and  which we don't want full symmetry we will be selecting half symmetry 
+by writing that in the code  and from that we will mention that its the natural frequency (from  I this the way to find once natural frequency and pattern in the universe, correct me if I am wrong) ,
+before doing this 
+till now we have code like
+(clear; close all; clc; tic;
+data = readtable("Acrylic_0.csv"); % .csv extension
+data = table2array(data);
+time = data(:,1);
+x    = data(:,2);
+plot(time,x)
+%Samplig frequncy
+dt   = time(98)-time(97);
+fs   = 1/dt;
+toc;)
+here we mentioned dt, fs as sample frequency  like for 10s its is 200000 and for 1 sec its is 20000, 
+1st we will plot that for all 10sec, and  i will be telling the specific spik interval  
+and give in the code suppose consider out of 10 sec I selected and wrote in code that frequency for 2.725 to 2.85 
+and it takes the difference from that given period of time and find difference like 0.075 of data (no. of data points) 
+and then he said we have to multiply with frequency (explain clearly this part ) 
+like 1 data its 0sec for 20000th data points its 1sec and here the basic step before FFT 
+help me to under stand thus clearly 1st then we will code and take time and be particular
+
