@@ -109,3 +109,85 @@ semilogx(f,Y)
 toc;
 
 
+
+11/06/2026
+
+general code for Universal Windowing Function (Wide-Sense Stationarity (WSS) Gating-----for advanced signal-processing journals)
+
+clear; close all; clc;
+
+DATA_FILE_NAME     = 'mill.mat'; % The name of your data file
+SAMPLING_FREQ_HZ   = 250;        % How many points recorded per second (fs)
+
+% Target signals to analyze
+% (For a new dataset, extract your signals and name them raw_Y1 and raw_Y2)
+load(DATA_FILE_NAME); 
+raw_Y1             = mill(1).vib_spindle; 
+raw_Y2             = mill(1).vib_table;   
+
+% Algorithmic Gating Tuners
+W_LENGTH           = 200;        % Sliding window width (w) for energy tracking
+ALPHA_TOLERANCE    = 0.15;       % Variance boundary threshold (+/- 15%)
+
+% Transition Zone Filters (Ignores immediate startup/shutdown index ranges)
+EARLIEST_START_IDX = 1500;       
+LATEST_END_IDX     = 7500;       
+
+
+%% 2. UNIVERSAL MATHEMATICAL GATING ENGINE (Do not alter)
+
+% Step 2.1: Compute Rolling Variance (Local Energy Profile)
+% [0, W_LENGTH-1] enforces a precise, forward-looking frame width
+rolling_variance = movvar(raw_Y1, [0, W_LENGTH-1]);
+
+% Step 2.2: Establish Central Geometric Baseline Reference
+mid_point = floor(length(raw_Y1) / 2);
+reference_range = (mid_point - 1000) : (mid_point + 1000);
+sigma_baseline = mean(rolling_variance(reference_range));
+
+% Step 2.3: Calculate Strict Statistical Stationarity Boundaries
+LB = (1 - ALPHA_TOLERANCE) * sigma_baseline;
+UB = (1 + ALPHA_TOLERANCE) * sigma_baseline;
+
+% Step 2.4: Algorithmic Entry/Exit Boundary Gating Detection
+valid_idx = find(rolling_variance >= LB & rolling_variance <= UB);
+n_start   = valid_idx(find(valid_idx > EARLIEST_START_IDX, 1, 'first'));
+n_end     = valid_idx(find(valid_idx < LATEST_END_IDX, 1, 'last'));
+
+% Safety fallback constraints if a signal contains extreme anomalies
+if isempty(n_start), n_start = round(length(raw_Y1) * 0.22); end
+if isempty(n_end),   n_end   = round(length(raw_Y1) * 0.78); end
+
+
+%% 3. FINAL EXTRACTION AND INTERFACE GENERATION
+% Extract pristine, stationary steady-state windows for downstream tasks
+clean_window_Y1 = raw_Y1(n_start:n_end);
+clean_window_Y2 = raw_Y2(n_start:n_end);
+
+% Print calculations summary metrics
+fprintf('====================================================\n');
+fprintf('     UNIVERSAL WSS GATING CALCULATIONS COMPLETE      \n');
+fprintf('====================================================\n');
+fprintf('Proven Entry Index (n_start): %d\n', n_start);
+fprintf('Proven Exit Index (n_end):   %d\n', n_end);
+fprintf('Total Sample Point Length:    %d points\n', length(clean_window_Y1));
+fprintf('Isolated Pure Action Time:    %.3f seconds\n', length(clean_window_Y1) / SAMPLING_FREQ_HZ);
+fprintf('====================================================\n');
+
+% Render Side-by-Side Diagnostic Verification Plots
+figure('Name', 'Generalized Stationarity Gating Profile');
+
+subplot(2,1,1);
+plot(raw_Y1, 'b'); hold on;
+xline(n_start, 'k-', 'Start Bound', 'LineWidth', 1.5);
+xline(n_end, 'k-', 'End Bound', 'LineWidth', 1.5);
+title('Signal 1: Isolated Operational Task Window');
+xlabel('Sample Index'); ylabel('Amplitude'); grid on;
+
+subplot(2,1,2);
+plot(raw_Y2, 'r'); hold on;
+xline(n_start, 'k-', 'Start Bound', 'LineWidth', 1.5);
+xline(n_end, 'k-', 'End Bound', 'LineWidth', 1.5);
+title('Signal 2: Isolated Operational Task Window');
+xlabel('Sample Index'); ylabel('Amplitude'); grid on;
+
