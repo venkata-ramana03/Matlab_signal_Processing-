@@ -1,0 +1,545 @@
+MY Health Indicator construction for Drilling vibration 
+using Entropy weighted method and ffi and kalman filter 
+
+total tehre are 5 Sections 
+Section 1:  Paramaters
+Section 2: FEATURE EXTRACTION & (SLIDING WINDOW)
+Section 3: FEATURE FUSION INDEX (FFI) & BASELINE SELECTION USING ENTROPY WEIGHT METHOD
+Section 4: KALMAN FILTER TRACKING (BUILDING HEALTH INDICATOR)
+Section 5: Transation DETECTION & VISUALIZATION (MULTI-MATERIAL READY)
+
+###########code starts############
+
+% Section 1: Paramaters
+% It is to  load any material file, adjust your manual cropping drilling time, and set your Natural frequency.
+clear; close all; clc; tic;
+% 1. Load Data 
+data_file = "2acrylic_2"; 
+data = readtable(data_file);
+data_matrix = table2array(data);
+
+time = data_matrix(:,1);
+x    = data_matrix(:,2);
+
+% 2. Calculate Sampling Frequency
+dt   = time(98)-time(97);
+fs = 1 / dt;
+
+fprintf('--- SAMPLING INFORMATION ---\n');
+fprintf('Loaded File        : %s\n', data_file);
+fprintf('Sampling Frequency : %.2f Hz\n', fs);
+
+% Raw Signal Plot
+figure('Name', 'Raw Signal', 'NumberTitle', 'off');
+plot(time, x, 'b', 'LineWidth', 1.0);
+xlabel('Time (seconds)');
+ylabel('Acceleration (g)');
+title(['Raw Full Signal: ', strrep(data_file, '_', '\_')]);
+grid on;
+
+% 3. Manual Cropping Inputs (Change these freely for any material)
+tStart = 1.8581;
+tEnd   = 11.3778;
+
+% Safe index mapping limits to prevent "index out of bounds" errors
+idxStart = max(1,          round(tStart * fs));
+idxEnd   = min(length(x),  round(tEnd   * fs));
+
+% Extract cropped timeline
+time_selected = time(idxStart:idxEnd);
+x_selected    = x(idxStart:idxEnd);
+N             = length(x_selected);
+df            = fs / N;
+crop_duration = time_selected(end) - time_selected(1);
+
+fprintf('\n--- CROPPING INFORMATION ---\n');
+fprintf('tStart              : %.4f seconds\n', tStart);
+fprintf('tEnd                : %.4f seconds\n', tEnd);
+fprintf('Number of Samples   : %d\n',           N);
+fprintf('Cropped Duration    : %.4f seconds\n', crop_duration);
+fprintf('Frequency Resolution: %.4f Hz\n',      df);
+
+% Cropped Signal Plot
+figure('Name', 'Cropped Region', 'NumberTitle', 'off');
+plot(time_selected, x_selected, 'b', 'LineWidth', 1.0);
+xlabel('Time (seconds)');
+ylabel('Acceleration (g)');
+title(['Drilling Region: ', strrep(data_file, '_', '\_')]);
+grid on;
+
+% 4. Natural Frequency  Inputs
+f_RAP     = 40.404;        % Change to your specific material's natural frequency (Hz)
+tolerance = 5.0;           % Search band (± Hz) for the final validation plot
+
+% (FFT)
+% 1. Remove DC offset to eliminate the massive 0 Hz spike
+x_fft = x_selected - mean(x_selected);
+
+% 2. Apply Hanning window to prevent spectral leakage
+win_h  = hann(N);
+x_fft  = x_fft .* win_h;
+
+% 3. Execute FFT and normalize amplitude spectrum
+Y_full = abs(fft(x_fft));
+Y_full = Y_full(1:floor(N/2)) * 2 / sum(win_h);
+f_full = (0 : length(Y_full)-1) * df;
+
+% 4. Locate the maximum peak within your RAP search band
+rap_mask = (f_full >= f_RAP - tolerance) & (f_full <= f_RAP + tolerance);
+if any(rap_mask)
+    [max_rap_amp, max_rap_idx] = max(Y_full(rap_mask));
+    band_frequencies = f_full(rap_mask);
+    actual_peak_freq = band_frequencies(max_rap_idx);
+    
+    fprintf('\n--- SPECTRAL PEAK VERIFICATION ---\n');
+    fprintf('Target RAP Frequency   : %.2f Hz\n', f_RAP);
+    fprintf('Actual Max Peak Found  : %.2f Hz (Amp: %.6f)\n', actual_peak_freq, max_rap_amp);
+else
+    fprintf('\n WARNING: No frequencies found inside the RAP search band.\n');
+end
+
+% 6. Diagnostic Plot 2: Wideband Nyquist first-half spectrum (0 to 10,000 Hz)
+figure('Name', 'Nyquist Wideband Spectrum (10kHz)', 'NumberTitle', 'off');
+idx_wide = f_full <= 10000; % Limits plot to the 10,000 Hz structural band
+plot(f_full(idx_wide), Y_full(idx_wide), 'b', 'LineWidth', 1.0, 'DisplayName', 'Nyquist Spectrum');
+hold on;
+
+% Add a subtle indicator for your target natural frequency on the wide curve
+plot(f_RAP, Y_full(round(f_RAP/df)+1), 'r^', 'MarkerSize', 6, 'MarkerFaceColor', 'r', ...
+    'DisplayName', sprintf('NF Position (%.1f Hz)', f_RAP));
+
+hold off;
+xlabel('Frequency (Hz)');
+ylabel('Acceleration Magnitude (g)');
+title(['Nyquist First-Half Spectrum (0-10,000 Hz): ', strrep(data_file, '_', '\_')]);
+legend('Location', 'best');
+grid on;
+% 5. Diagnostic Plot 1: Focused low-frequency mechanical spectrum (0 to 500 Hz)
+figure('Name', 'Initial Spectral Analysis (500Hz Zoom)', 'NumberTitle', 'off');
+idx_zoom = f_full <= 500; 
+plot(f_full(idx_zoom), Y_full(idx_zoom), 'b', 'LineWidth', 1.2, 'DisplayName', 'Signal Spectrum');
+hold on;
+
+% Mark the targeted RAP center line and its search tolerances
+xline(f_RAP, 'r--', 'LineWidth', 2.0, ...
+    'Label', sprintf('Target RAP = %.2f Hz', f_RAP), 'LabelOrientation', 'aligned');
+xline(f_RAP - tolerance, 'k:', 'LineWidth', 1.2, 'DisplayName', 'Lower Band Limit');
+xline(f_RAP + tolerance, 'k:', 'LineWidth', 1.2, 'DisplayName', 'Upper Band Limit');
+
+% If a peak was found, highlight it with a red circle indicator
+if any(rap_mask)
+    plot(actual_peak_freq, max_rap_amp, 'ro', 'MarkerSize', 8, 'LineWidth', 2, ...
+        'DisplayName', 'Detected Peak');
+end
+hold off;
+xlabel('Frequency (Hz)');
+ylabel('Amplitude (g)');
+title(['Zoomed FFT with NF (0-500 Hz): ', strrep(data_file, '_', '\_')]);
+legend('Location', 'northeast');
+grid on;
+% SECTION 2: FEATURE EXTRACTION (SLIDING WINDOW)
+% =========================================================================
+win_sec  = 0.030; 
+hop_sec  = 0.015; 
+win_samp = round(win_sec * fs);
+hop_samp = round(hop_sec * fs);
+
+% Determine sliding frame boundaries
+starts = 1 : hop_samp : (N - win_samp + 1);
+n_wins = length(starts);
+
+% Initialize timeline tracking
+w_time = zeros(n_wins, 1);
+
+%  EXTRACT RAW INDIVIDUAL METRICS 
+% [FUTURE PROOFING]: To add/remove features later, simply add or remove 
+% storage vectors here and link them inside the processing loop below.
+w_rms_raw = zeros(n_wins, 1);
+w_var_raw = zeros(n_wins, 1);
+w_kur_raw = zeros(n_wins, 1);
+w_pek_raw = zeros(n_wins, 1);
+
+for i = 1 : n_wins
+    i_start = starts(i);
+    i_end   = i_start + win_samp - 1;
+    seg     = x_selected(i_start:i_end);
+    
+    % Store the midpoint time of the current window segment
+    w_time(i) = time_selected(round((i_start + i_end) / 2));
+
+    % Pre-processing: Remove localized window DC bias
+    seg_dc = seg - mean(seg);
+    
+    % FEATURE EQUATIONS (Change/Modify these freely) 
+    w_rms_raw(i) = rms(seg_dc);       % Root Mean Square
+    w_var_raw(i) = var(seg_dc);       % Variance
+    w_kur_raw(i) = kurtosis(seg_dc);  % Kurtosis/Impulsiveness Metric
+    w_pek_raw(i) = max(abs(seg_dc));  % Peak Absolute Amplitude
+end
+
+%  COMBINE INTO RAW MASTER MATRIX 
+% [FUTURE PROOFING]: If you change your features, update this matrix array 
+% layout to match. Your total column count must equal the weights array length.
+raw_features = [w_rms_raw, w_var_raw, w_kur_raw, w_pek_raw];
+
+fprintf('\n--- FEATURE EXTRACTION COMPLETE ---\n');
+fprintf('Total Windows Processed: %d\n',    n_wins);
+fprintf('Mean RMS               : %.4f g\n', mean(w_rms_raw));
+fprintf('Mean Variance          : %.6f\n',  mean(w_var_raw));
+fprintf('Mean Kurtosis          : %.4f\n',  mean(w_kur_raw));
+fprintf('Mean Peak Value        : %.4f g\n', mean(w_pek_raw));
+
+% SECTION 3: FEATURE FUSION INDEX (FFI) & BASELINE SELECTION USING ENTROPY WEIGHT METHOD
+% =========================================================================
+% Establish stable baseline frame index boundaries (20% to 40%)
+baseline_start = round(0.20 * n_wins);
+baseline_end   = round(0.40 * n_wins);
+
+% Dynamic matrix properties to handle any future feature swaps effortlessly
+[num_windows, num_features] = size(raw_features);
+baseline_means = zeros(1, num_features);
+normalized_features = zeros(num_windows, num_features);
+
+fprintf('\n--- NORMALIZATION BASELINES (windows %d to %d) ---\n', ...
+    baseline_start, baseline_end);
+
+% 1. Calculate baseline references and normalize columns dynamically
+for col = 1 : num_features
+    feature_baseline = raw_features(baseline_start:baseline_end, col);
+    baseline_means(col) = mean(feature_baseline);
+    
+    if baseline_means(col) < eps
+        baseline_means(col) = 1.0; 
+    end
+    
+    normalized_features(:, col) = raw_features(:, col) / baseline_means(col);
+    fprintf('Feature Column %d Baseline Reference: %.6f\n', col, baseline_means(col));
+end
+
+% Extract separate normalized arrays for later visualization
+rms_norm = normalized_features(:, 1);
+var_norm = normalized_features(:, 2);
+kur_norm = normalized_features(:, 3);
+pek_norm = normalized_features(:, 4);
+
+% =========================================================================
+% [ALGORITHM]: ENTROPY WEIGHT METHOD (OBJECTIVE WEIGHT GENERATION)
+% =========================================================================
+% Step A: Min-Max scale the normalized features to a strictly positive range [0, 1]
+% This protects the logarithm math inside the entropy calculations.
+f_min = min(normalized_features, [], 1);
+f_max = max(normalized_features, [], 1);
+range_f = f_max - f_min;
+range_f(range_f < eps) = 1.0; % Anti-division-by-zero check
+
+scaled_features = zeros(num_windows, num_features);
+for col = 1 : num_features
+    scaled_features(:, col) = (normalized_features(:, col) - f_min(col)) / range_f(col);
+end
+
+% Step B: Calculate probability distributions within each column profile
+prob_matrix = zeros(num_windows, num_features);
+for col = 1 : num_features
+    sum_col = sum(scaled_features(:, col));
+    if sum_col < eps, sum_col = 1.0; end
+    prob_matrix(:, col) = scaled_features(:, col) / sum_col;
+end
+
+% Step C: Compute Information Entropy (E) for each separate metric column
+k_entropy = 1 / log(num_windows);
+E = zeros(1, num_features);
+for col = 1 : num_features
+    p = prob_matrix(:, col);
+    % Calculate p * log(p) safely while skipping zero boundaries
+    p_log_p = zeros(num_windows, 1);
+    valid_idx = p > 0;
+    p_log_p(valid_idx) = p(valid_idx) .* log(p(valid_idx));
+    
+    E(col) = -k_entropy * sum(p_log_p);
+end
+
+% Step D: Calculate Information Divergence (D) and distribute weights array
+D = 1 - E;
+sum_D = sum(D);
+if sum_D < eps, sum_D = 1.0; end
+
+% Final optimized objective weights vector
+weights = D / sum_D;
+
+% 2. Execute Feature Fusion Index (FFI) multiplication
+FFI = normalized_features * weights';
+
+fprintf('\n--- ALGORITHMIC WEIGHTS GENERATION COMPLETE ---\n');
+fprintf('Weights calculated dynamically: RMS=%.4f  Variance=%.4f  Kurtosis=%.4f  Peak=%.4f\n', ...
+    weights(1), weights(2), weights(3), weights(4));
+fprintf('Sum of generated weights      : %.2f\n', sum(weights));
+fprintf('Mean FFI during baseline      : %.4f\n', mean(FFI(baseline_start:baseline_end)));
+fprintf('Mean FFI overall              : %.4f\n', mean(FFI));
+
+% SECTION 4: KALMAN FILTER TRACKING (BUILDING HEALTH INDICATOR)
+% =========================================================================
+% Calculate the localized sampling time interval between sliding windows
+dt_win = w_time(2) - w_time(1);
+
+% 1. State Transition Matrix (A_kf)
+% Model physics: 
+%   Health(k+1) = Health(k) + Rate(k) * dt
+%   Rate(k+1)   = Rate(k)
+A_kf = [1, dt_win; ...
+        0, 1     ];
+
+% 2. Observation Matrix (H_kf)
+% Maps hidden states to the single physical observation (z = FFI)
+% FFI strictly measures current health level, not its acceleration rate
+H_kf =[1, 0];
+
+% 3. Process Noise Covariance Matrix (Q_kf)
+% Quantifies internal state uncertainty from frame to frame
+% Q(1,1): Random walk variance of the actual hidden health condition
+% Q(2,2): Slow-varying rate fluctuation variance
+Q_kf = [1e-4, 0   ; ...
+        0,    1e-6];
+
+% 4. Measurement Noise Covariance (R_kf)
+% Dynamically calculated using the exact variance of your stable baseline FFI.
+% This calibrates the filter to ignore the background noise floor of the loaded file.
+R_kf = var(FFI(baseline_start:baseline_end));
+if R_kf < eps, R_kf = 1e-4; end
+
+% 5. Initial Conditions Initialization
+x_kf = [FFI(1); 0];    % Start state: [Initial FFI Observation; Initial Rate of 0]
+P_kf = eye(2) * 0.01;  % State Estimation Error Covariance (Initial uncertainty level)
+
+% 6. Initialize Pre-allocated Vectors for Performance Tracking
+Estimated_Drilling_Health = zeros(n_wins, 1);
+Health_Evolution_Rate     = zeros(n_wins, 1);
+innovations               = zeros(n_wins, 1);
+
+% 7. Execute Kalman Recursion Loop across all  Windows
+for k = 1 : n_wins
+    % A. TIME UPDATE (PREDICTION STEP)
+    x_pred = A_kf * x_kf;
+    P_pred = A_kf * P_kf * A_kf' + Q_kf;
+
+    % B. MEASUREMENT CAPTURE
+    z_k = FFI(k);
+
+    % C. INNOVATION COMPUTATION (The "Surprise" Residual)
+    % Measures the raw error difference between physical data and tracking models
+    innov_k = z_k - H_kf * x_pred;
+
+    % D. KALMAN GAIN RECALCULATION
+    % Determines whether to trust the physics prediction model or the noisy FFI sensor data
+    S_k = H_kf * P_pred * H_kf' + R_kf;
+    K_k = (P_pred * H_kf') / S_k;
+
+    % E. MEASUREMENT UPDATE (CORRECTION STEP)
+    % Updates the vector arrays to calculate our true hidden metrics
+    x_kf = x_pred + K_k * innov_k;
+    P_kf = (eye(2) - K_k * H_kf) * P_pred;
+
+    % F. STORE RESULTS
+    Estimated_Drilling_Health(k) = x_kf(1); % This is your actual final Health Indicator (HI)
+    Health_Evolution_Rate(k)     = x_kf(2); % The true internal velocity/speed of degradation
+    innovations(k)               = abs(innov_k); % Absolute predictive tracking mismatch
+end
+
+fprintf('\n--- KALMAN FILTER TRACKING COMPLETE ---\n');
+fprintf('Max Innovation Residual Found : %.4f\n', max(innovations));
+fprintf('Mean Innovation Residual Floor: %.4f\n', mean(innovations));
+
+% SECTION 5: BREAKTHROUGH DETECTION & VISUALIZATION (MULTI-MATERIAL READY)
+% =========================================================================
+% 1. Compute the Adaptive Operational Limit over a 20-window running median
+baseline_win_count = 20;
+adaptive_threshold = zeros(n_wins, 1);
+
+for k = 1 : n_wins
+    k_start = max(1, k - baseline_win_count + 1);
+    adaptive_threshold(k) = 3.0 * median(innovations(k_start:k));
+end
+
+% 2. Multi-Boundary/Layer Transition Evaluation Search
+% Begins after the first 20% of windows to bypass entry transients
+search_start     = round(0.20 * n_wins);
+persistence_req  = 5; % Requires 5 consecutive windows to minimize false positives
+consec           = 0;
+
+% Storage arrays for tracking multiple transitions (e.g. sandwich interfaces)
+transition_indices = [];
+transition_times   = [];
+
+% Refractory window (lockout frames) to prevent double-triggering on a single event
+cooldown_frames   = 15; 
+frames_since_trigger = cooldown_frames;
+
+for k = search_start : n_wins
+    frames_since_trigger = frames_since_trigger + 1;
+    
+    if innovations(k) > adaptive_threshold(k)
+        consec = consec + 1;
+        if consec >= persistence_req && frames_since_trigger >= cooldown_frames
+            detected_idx = k - persistence_req + 1;
+            transition_indices = [transition_indices; detected_idx];
+            transition_times   = [transition_times; w_time(detected_idx)];
+            
+            % Reset counter and initiate refractory period
+            consec = 0;
+            frames_since_trigger = 0;
+        end
+    else
+        consec = 0;
+    end
+end
+
+% 3. Print Detection Diagnostics Report to Command Window
+fprintf('\n--- STRUCTURAL TRANSITION DETECTION REPORT ---\n');
+num_transitions = length(transition_times);
+if num_transitions > 0
+    fprintf('Total Layer Boundary/Exit Events Detected: %d\n', num_transitions);
+    for t = 1 : num_transitions
+        idx = transition_indices(t);
+        fprintf('Event %d Caught at : %.4f seconds (Window %d)\n', t, transition_times(t), idx);
+        fprintf('Health State Level : %.4f\n', Estimated_Drilling_Health(idx));
+        fprintf('Evolution Rate     : %.6f\n', Health_Evolution_Rate(idx));
+        fprintf('Innovation Residual Error   : %.4f\n\n', innovations(idx));
+    end
+else
+    fprintf('No anomalous material or layer boundary transitions detected.\n');
+    fprintf('(A uniform baseline state profile is normal for single-material runs)\n\n');
+end
+
+% =========================================================================
+% TEXTBOOK STYLE GRAPHICAL PLOTS (PART 1: STANDALONE INDIVIDUAL VISUALS)
+% =========================================================================
+
+% --- PLOT 3 — INDIVIDUAL NORMALIZED FEATURES PROFILE ---
+figure('Name', 'Feature Contributions', 'NumberTitle', 'off');
+plot(w_time, rms_norm,  'b',  'LineWidth', 1.2); hold on;
+plot(w_time, var_norm,  'g',  'LineWidth', 1.2);
+plot(w_time, kur_norm,  'm',  'LineWidth', 1.2);
+plot(w_time, pek_norm,  'c',  'LineWidth', 1.2);
+plot(w_time, FFI,       'k',  'LineWidth', 2.0);
+yline(1.0, 'k--', 'LineWidth', 1.0);
+if num_transitions > 0
+    for t = 1 : num_transitions
+        xline(transition_times(t), 'r-', 'LineWidth', 1.5, 'Label', sprintf('Transition %d', t));
+    end
+end
+hold off;
+xlabel('Time (seconds)');
+ylabel('Normalized Magnitude (Dimensionless)');
+title(['Normalized Feature Input Contributions: ', strrep(data_file, '_', '\_')]);
+legend('RMS (norm)', 'Variance (norm)', 'Kurtosis (norm)', 'Peak Value (norm)', ...
+       'Fused Observation (FFI)', 'Baseline Reference = 1.0', 'Location', 'best');
+grid on;
+
+% --- PLOT 4 — FFI AND ESTIMATED DRILLING HEALTH STATE ---
+figure('Name', 'Final Health Indicator', 'NumberTitle', 'off');
+plot(w_time, FFI,                       'b:', 'LineWidth', 1.2); hold on;
+plot(w_time, Estimated_Drilling_Health, 'r',  'LineWidth', 2.5);
+yline(1.0, 'k--', 'LineWidth', 1.0);
+if num_transitions > 0
+    for t = 1 : num_transitions
+        xline(transition_times(t), 'r-', 'LineWidth', 1.5, 'Label', sprintf('Transition %d', t));
+    end
+end
+hold off;
+xlabel('Time (seconds)');
+ylabel('Estimated Health State \\hat{x}_1');
+title(['Raw FFI vs. Kalman Filter Health Indicator: ', strrep(data_file, '_', '\_')]);
+legend('Noisy Measurement Input (FFI)', 'True Hidden Health Indicator (HI)', 'Baseline Calibration = 1.0', 'Location', 'best');
+grid on;
+
+% --- PLOT 5 — HEALTH EVOLUTION RATE ---
+figure('Name', 'Degradation Velocity', 'NumberTitle', 'off');
+plot(w_time, Health_Evolution_Rate, 'b', 'LineWidth', 1.5); hold on;
+yline(0, 'k--', 'LineWidth', 1.0);
+if num_transitions > 0
+    for t = 1 : num_transitions
+        xline(transition_times(t), 'r-', 'LineWidth', 1.5, 'Label', sprintf('Transition %d', t));
+    end
+end
+hold off;
+xlabel('Time (seconds)');
+ylabel('Health Evolution Rate \\hat{x}_2 (s^{-1})');
+title(['Kalman State Tracking: Health Evolution Rate: ', strrep(data_file, '_', '\_')]);
+grid on;
+
+% --- PLOT 6 — INNOVATION RESIDUAL WITH ADAPTIVE THRESHOLD ---
+figure('Name', 'Boundary Evaluation Alarm', 'NumberTitle', 'off');
+plot(w_time, innovations,        'b',   'LineWidth', 1.2); hold on;
+plot(w_time, adaptive_threshold, 'r--', 'LineWidth', 1.5);
+if num_transitions > 0
+    for t = 1 : num_transitions
+        xline(transition_times(t), 'r-', 'LineWidth', 1.5, 'Label', sprintf('Transition %d', t));
+        plot(w_time(transition_indices(t)), innovations(transition_indices(t)), ...
+            'ro', 'MarkerSize', 10, 'MarkerFaceColor', 'r');
+    end
+end
+hold off;
+xlabel('Time (seconds)');
+ylabel('Innovation Residual Error');
+title(['Kalman Predictive Innovation with Adaptive Threshold: ', strrep(data_file, '_', '\_')]);
+legend('Filter Residual Mismatch', 'Adaptive Operational Limit (3 \\times \\tilde{\\mathbf{\\gamma}}_k)', 'Location', 'best');
+grid on;
+
+
+% =========================================================================
+% TEXTBOOK STYLE GRAPHICAL PLOTS (PART 2: ADDITIONAL CONSOLIDATED MASTER)
+% =========================================================================
+% Stacked vertically to share the exact same X-axis timeline for visual verification
+figure('Name', 'Consolidated Kalman Filtering State Diagnostic', 'NumberTitle', 'off');
+
+% Subplot A: FFI vs. Estimated Health State (x_1)
+ax1 = subplot(3, 1, 1);
+plot(w_time, FFI, 'b:', 'LineWidth', 1.2, 'DisplayName', 'Fused Observation (FFI)'); hold on;
+plot(w_time, Estimated_Drilling_Health, 'r', 'LineWidth', 2.5, 'DisplayName', 'Estimated Health State \\hat{x}_1');
+yline(1.0, 'k--', 'LineWidth', 1.0);
+if num_transitions > 0
+    for t = 1 : num_transitions
+        xline(transition_times(t), 'r-', 'LineWidth', 1.5);
+    end
+end
+hold off;
+ylabel('Estimated Health State \\hat{x}_1');
+title(['State Tracking and Process Degradation Profile: ', strrep(data_file, '_', '\_')]);
+legend('Location', 'best');
+grid on;
+
+% Subplot B: Health Evolution Rate (x_2)
+ax2 = subplot(3, 1, 2);
+plot(w_time, Health_Evolution_Rate, 'b', 'LineWidth', 1.5); hold on;
+yline(0, 'k--', 'LineWidth', 1.0);
+if num_transitions > 0
+    for t = 1 : num_transitions
+        xline(transition_times(t), 'r-', 'LineWidth', 1.5);
+    end
+end
+hold off;
+ylabel('Health Evolution Rate \\hat{x}_2 (s^{-1})');
+title('Kalman State Tracking: Health Evolution Rate');
+grid on;
+
+% Subplot C: Kalman Predictive Innovation vs. Adaptive Operational Limit
+ax3 = subplot(3, 1, 3);
+plot(w_time, innovations, 'b', 'LineWidth', 1.2, 'DisplayName', 'Filter Residual Mismatch'); hold on;
+plot(w_time, adaptive_threshold, 'r--', 'LineWidth', 1.5, 'DisplayName', 'Adaptive Operational Limit (3 \\times \\tilde{\\mathbf{\\gamma}}_k)');
+if num_transitions > 0
+    for t = 1 : num_transitions
+        xline(transition_times(t), 'r-', 'LineWidth', 1.5);
+        plot(w_time(transition_indices(t)), innovations(transition_indices(t)), ...
+            'ro', 'MarkerSize', 8, 'MarkerFaceColor', 'r', 'HandleVisibility', 'off'); % <--- Fixed the property typo here
+    end
+end
+hold off;
+xlabel('Time (seconds)');
+ylabel('Innovation Residual Error');
+title('Filter Innovation Tracking & Boundary Alarm');
+legend('Location', 'best');
+grid on;
+
+% Force perfect vertical alignment across all timelines to ensure unassailable clarity
+linkaxes([ax1, ax2, ax3], 'x');
+
+toc;
